@@ -74,6 +74,17 @@ Workflow `.github/workflows/tests.yml`:
 - **workflow_dispatch** → выбор: `dev` / `prod` / `all` + область тестов.
 - Каждый стенд деплоится в gh-pages отдельной подпапкой (`/dev/`, `/prod/`).
 - На корне — индексная страница с кнопками для переключения между стендами.
+- После каждого прогона в **Job Summary** выводятся прямые ссылки на отчёты.
+
+### Ссылки на отчёты
+
+| Стенд | URL |
+|-------|-----|
+| 🏠 Индекс | https://aliapiat.github.io/neurokey-autotests/ |
+| 🟢 DEV    | https://aliapiat.github.io/neurokey-autotests/dev/ |
+| 🔴 PROD   | https://aliapiat.github.io/neurokey-autotests/prod/ |
+
+> Чтобы ссылки работали, в **Settings → Pages** источник должен быть `Deploy from a branch` → ветка `gh-pages` → папка `/ (root)`.
 
 ### Secrets, которые нужно завести в репозитории
 

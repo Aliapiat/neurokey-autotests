@@ -165,6 +165,29 @@ jobs:
           path: allure-results/
           retention-days: 14
 
+      - name: 📝 Tests summary
+        if: always()
+        run: |
+          REPO="${GITHUB_REPOSITORY#*/}"
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          ENV_NAME="${{ matrix.env }}"
+          BASE_URL=$( [ "$ENV_NAME" = "prod" ] && echo "https://app.neiroklyuch.ru/" || echo "https://wmt1.acm-ai.ru/" )
+          REPORT_URL="https://${OWNER}.github.io/${REPO}/${ENV_NAME}/"
+          INDEX_URL="https://${OWNER}.github.io/${REPO}/"
+          {
+            echo "## 🎭 Tests on \`${ENV_NAME}\`"
+            echo ""
+            echo "- **Base URL:** ${BASE_URL}"
+            echo "- **Commit:** \`${GITHUB_SHA:0:8}\`"
+            echo ""
+            echo "### 📊 Allure report"
+            echo ""
+            echo "- 📍 [Отчёт по стенду \`${ENV_NAME}\`](${REPORT_URL})"
+            echo "- 🏠 [Индексная страница (выбор стенда)](${INDEX_URL})"
+            echo ""
+            echo "> Ссылки станут активны после завершения джобов **Report** и **Update index page** (обычно +1–2 мин)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # ─────────────────────────────────────────────
   # Отчёт: каждый стенд — отдельная подпапка в gh-pages
   # ─────────────────────────────────────────────
@@ -232,6 +255,21 @@ jobs:
           publish_dir: allure-report
           destination_dir: ${{ matrix.env }}
           keep_files: true
+
+      - name: 📝 Report summary
+        if: always()
+        run: |
+          REPO="${GITHUB_REPOSITORY#*/}"
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          ENV_NAME="${{ matrix.env }}"
+          REPORT_URL="https://${OWNER}.github.io/${REPO}/${ENV_NAME}/"
+          {
+            echo "## 📊 Allure report for \`${ENV_NAME}\` is ready"
+            echo ""
+            echo "🔗 **[Открыть отчёт](${REPORT_URL})**"
+            echo ""
+            echo "_Если открывается 404 — проверь Settings → Pages → Source: \`Deploy from a branch\`, ветка \`gh-pages\`, папка \`/ (root)\`._"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ─────────────────────────────────────────────
   # Индексная страница с выбором стенда
@@ -326,3 +364,20 @@ jobs:
           publish_branch: gh-pages
           publish_dir: public
           keep_files: true
+
+      - name: 📝 Index summary
+        if: always()
+        run: |
+          REPO="${GITHUB_REPOSITORY#*/}"
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          INDEX_URL="https://${OWNER}.github.io/${REPO}/"
+          {
+            echo "## 🏠 Allure Reports — Neurokey"
+            echo ""
+            echo "🔗 **[Выбор стенда](${INDEX_URL})**"
+            echo ""
+            echo "| Стенд | Ссылка |"
+            echo "|-------|--------|"
+            echo "| 🟢 DEV  | [${INDEX_URL}dev/](${INDEX_URL}dev/) |"
+            echo "| 🔴 PROD | [${INDEX_URL}prod/](${INDEX_URL}prod/) |"
+          } >> "$GITHUB_STEP_SUMMARY"
