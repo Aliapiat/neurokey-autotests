@@ -1,0 +1,328 @@
+name: 🧪 Neurokey Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Выбор стенда (prod запускается ТОЛЬКО вручную)"
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - prod
+          - all
+      test_scope:
+        description: "Какие тесты запускать"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - smoke
+          - login
+          - auth
+          - chat
+          - messaging
+          - models
+          - responsive
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Формируем матрицу стендов
+  # ─────────────────────────────────────────────
+  prepare:
+    name: 🎯 Prepare matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - id: set-matrix
+        run: |
+          # push / PR — только dev.
+          # workflow_dispatch — выбор пользователя (dev / prod / all).
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo 'matrix=["dev"]' >> $GITHUB_OUTPUT
+          elif [ "${{ inputs.environment }}" = "all" ]; then
+            echo 'matrix=["dev","prod"]' >> $GITHUB_OUTPUT
+          else
+            echo "matrix=[\"${{ inputs.environment }}\"]" >> $GITHUB_OUTPUT
+          fi
+
+  # ─────────────────────────────────────────────
+  # Прогон тестов
+  # ─────────────────────────────────────────────
+  test:
+    name: 🎭 Tests on ${{ matrix.env }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: .
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: 📦 Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: 🔐 Resolve credentials per env
+        id: creds
+        run: |
+          if [ "${{ matrix.env }}" = "prod" ]; then
+            echo "email=${{ secrets.ADMIN_EMAIL_PROD }}" >> $GITHUB_OUTPUT
+            echo "password=${{ secrets.ADMIN_PASSWORD_PROD }}" >> $GITHUB_OUTPUT
+          else
+            echo "email=${{ secrets.ADMIN_EMAIL_DEV }}" >> $GITHUB_OUTPUT
+            echo "password=${{ secrets.ADMIN_PASSWORD_DEV }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🎭 Run tests
+        continue-on-error: true
+        run: |
+          mkdir -p allure-results
+          SCOPE="$( [ '${{ github.event_name }}' = 'workflow_dispatch' ] && echo '${{ inputs.test_scope }}' || echo 'all' )"
+          if [ "$SCOPE" = "all" ]; then
+            MARKER_FLAG=""
+          else
+            MARKER_FLAG="-m $SCOPE"
+          fi
+          pytest tests/ \
+            --env ${{ matrix.env }} \
+            --alluredir=allure-results \
+            $MARKER_FLAG \
+            -v
+        env:
+          ADMIN_EMAIL: ${{ steps.creds.outputs.email }}
+          ADMIN_PASSWORD: ${{ steps.creds.outputs.password }}
+          HEADLESS: "true"
+
+      - name: 🏷 Tag results with env
+        if: always()
+        run: |
+          cd allure-results
+          python3 << 'EOF'
+          import json, glob
+          env_name = "${{ matrix.env }}"
+          label_map = {
+              "dev":  "🟢 DEV — wmt1.acm-ai.ru",
+              "prod": "🔴 PROD — app.neiroklyuch.ru",
+          }
+          pretty = label_map.get(env_name, env_name)
+          for f in glob.glob("*-result.json"):
+              try:
+                  with open(f, "r", encoding="utf-8") as file:
+                      data = json.load(file)
+              except Exception as exc:
+                  print(f"skip {f}: {exc}")
+                  continue
+              labels = [l for l in data.get("labels", []) if l.get("name") not in ("parentSuite", "env")]
+              labels.append({"name": "parentSuite", "value": pretty})
+              labels.append({"name": "env", "value": env_name})
+              data["labels"] = labels
+              with open(f, "w", encoding="utf-8") as file:
+                  json.dump(data, file, ensure_ascii=False)
+          print(f"Tagged all results with env: {env_name}")
+          EOF
+
+      - name: 📦 Add environment.properties for Allure
+        if: always()
+        run: |
+          cat > allure-results/environment.properties << EOF
+          Environment=${{ matrix.env }}
+          BaseURL=$( [ '${{ matrix.env }}' = 'prod' ] && echo 'https://app.neiroklyuch.ru/' || echo 'https://wmt1.acm-ai.ru/' )
+          Python=3.12
+          Playwright=1.49.1
+          CommitSHA=${{ github.sha }}
+          EOF
+
+      - name: 📊 Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results-${{ matrix.env }}
+          path: allure-results/
+          retention-days: 14
+
+  # ─────────────────────────────────────────────
+  # Отчёт: каждый стенд — отдельная подпапка в gh-pages
+  # ─────────────────────────────────────────────
+  report:
+    name: 📊 Report for ${{ matrix.env }}
+    needs: [prepare, test]
+    runs-on: ubuntu-latest
+    if: always() && needs.test.result != 'skipped'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        env: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+        continue-on-error: true
+
+      - name: 📥 Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-results-${{ matrix.env }}
+          path: allure-results
+
+      - name: 📂 Verify results
+        run: |
+          echo "=== Files downloaded ==="
+          ls -la allure-results/ || true
+          echo ""
+          echo "=== Result files ==="
+          ls allure-results/*-result.json 2>/dev/null | wc -l || true
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: 📊 Install Allure
+        run: |
+          wget -qO- https://github.com/allure-framework/allure2/releases/download/2.30.0/allure-2.30.0.tgz | tar xz
+          echo "$PWD/allure-2.30.0/bin" >> $GITHUB_PATH
+
+      - name: 📜 Keep history from previous runs
+        run: |
+          if [ -d "gh-pages/${{ matrix.env }}/history" ]; then
+            echo "Found previous history for ${{ matrix.env }}"
+            cp -r gh-pages/${{ matrix.env }}/history allure-results/history
+          else
+            echo "No previous history found for ${{ matrix.env }}"
+          fi
+
+      - name: 📊 Generate report
+        run: |
+          allure generate allure-results --clean -o allure-report
+
+      - name: 🚀 Deploy to Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-report
+          destination_dir: ${{ matrix.env }}
+          keep_files: true
+
+  # ─────────────────────────────────────────────
+  # Индексная страница с выбором стенда
+  # ─────────────────────────────────────────────
+  index:
+    name: 🏠 Update index page
+    needs: report
+    runs-on: ubuntu-latest
+    if: always() && needs.report.result != 'skipped'
+
+    steps:
+      - name: 📝 Create index.html
+        run: |
+          mkdir -p public
+          cat > public/index.html << 'HTML'
+          <!DOCTYPE html>
+          <html lang="ru">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>🧪 Neurokey — Test Reports</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: #0f172a;
+                color: #e2e8f0;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              }
+              .container { max-width: 640px; width: 100%; padding: 2rem; }
+              h1 {
+                text-align: center;
+                font-size: 2rem;
+                margin-bottom: 0.5rem;
+                background: linear-gradient(135deg, #60a5fa, #a78bfa);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+              }
+              .subtitle { text-align: center; color: #94a3b8; margin-bottom: 2rem; font-size: 0.95rem; }
+              .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+              a.card {
+                display: block;
+                padding: 1.75rem;
+                background: #1e293b;
+                border: 1px solid #334155;
+                border-radius: 12px;
+                text-decoration: none;
+                color: #e2e8f0;
+                transition: all 0.2s;
+                text-align: center;
+              }
+              a.card:hover {
+                border-color: #60a5fa;
+                transform: translateY(-2px);
+                box-shadow: 0 4px 20px rgba(96, 165, 250, 0.2);
+              }
+              .card .emoji { font-size: 2.2rem; margin-bottom: 0.5rem; }
+              .card .name { font-size: 1.15rem; font-weight: 600; }
+              .card .desc { font-size: 0.82rem; color: #94a3b8; margin-top: 0.4rem; }
+              .footer { text-align: center; margin-top: 2rem; color: #475569; font-size: 0.8rem; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>🧪 Neurokey — Allure Reports</h1>
+              <p class="subtitle">Выберите стенд для просмотра отчёта</p>
+              <div class="grid">
+                <a class="card" href="./dev/">
+                  <div class="emoji">🟢</div>
+                  <div class="name">DEV</div>
+                  <div class="desc">wmt1.acm-ai.ru</div>
+                </a>
+                <a class="card" href="./prod/">
+                  <div class="emoji">🔴</div>
+                  <div class="name">PROD</div>
+                  <div class="desc">app.neiroklyuch.ru</div>
+                </a>
+              </div>
+              <div class="footer">Neurokey autotests · Playwright + Python + Allure</div>
+            </div>
+          </body>
+          </html>
+          HTML
+
+      - name: 🚀 Deploy index
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: public
+          keep_files: true
