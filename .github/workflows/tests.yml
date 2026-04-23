@@ -87,16 +87,35 @@ jobs:
           pip install -r requirements.txt
           playwright install --with-deps chromium
 
+      # ВАЖНО: секреты прокидываем через env:, а не подставляем шаблоном
+      # прямо в bash-строку. Иначе пароль вида `...$Ay` схлопнется:
+      # bash внутри "..." раскроет `$Ay` как переменную (пусто) и
+      # пароль приедет усечённым — тесты упадут с «неверным паролем».
+      # Запись в GITHUB_OUTPUT — через heredoc, чтобы устоять к `$`,
+      # `"` и многострочным значениям.
       - name: 🔐 Resolve credentials per env
         id: creds
+        env:
+          _EMAIL_DEV: ${{ secrets.ADMIN_EMAIL_DEV }}
+          _PASSWORD_DEV: ${{ secrets.ADMIN_PASSWORD_DEV }}
+          _EMAIL_PROD: ${{ secrets.ADMIN_EMAIL_PROD }}
+          _PASSWORD_PROD: ${{ secrets.ADMIN_PASSWORD_PROD }}
         run: |
           if [ "${{ matrix.env }}" = "prod" ]; then
-            echo "email=${{ secrets.ADMIN_EMAIL_PROD }}" >> $GITHUB_OUTPUT
-            echo "password=${{ secrets.ADMIN_PASSWORD_PROD }}" >> $GITHUB_OUTPUT
+            E="$_EMAIL_PROD"
+            P="$_PASSWORD_PROD"
           else
-            echo "email=${{ secrets.ADMIN_EMAIL_DEV }}" >> $GITHUB_OUTPUT
-            echo "password=${{ secrets.ADMIN_PASSWORD_DEV }}" >> $GITHUB_OUTPUT
+            E="$_EMAIL_DEV"
+            P="$_PASSWORD_DEV"
           fi
+          {
+            echo "email<<__CREDS_EOF__"
+            printf '%s\n' "$E"
+            echo "__CREDS_EOF__"
+            echo "password<<__CREDS_EOF__"
+            printf '%s\n' "$P"
+            echo "__CREDS_EOF__"
+          } >> "$GITHUB_OUTPUT"
 
       # Не печатаем значения — только длины и безопасные флаги.
       # Значения в env (не в bash-кавычках), чтобы пароль с ' или " не ломал скрипт.
