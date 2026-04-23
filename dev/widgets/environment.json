@@ -1,1 +1,1 @@
-[{"values":["dev"],"name":"Environment"},{"values":["https://wmt1.acm-ai.ru/"],"name":"BaseURL"},{"values":["3.12"],"name":"Python"},{"values":["1.49.1"],"name":"Playwright"},{"values":["8df188f0c86bfcb9dddc31a8e57bbf0c92670d17"],"name":"CommitSHA"}]
+[{"values":["dev"],"name":"Environment"},{"values":["https://wmt1.acm-ai.ru/"],"name":"BaseURL"},{"values":["3.12"],"name":"Python"},{"values":["1.49.1"],"name":"Playwright"},{"values":["9a28e9273d7b3f79b75abc3e5ec2861ffcace0fa"],"name":"CommitSHA"}]
