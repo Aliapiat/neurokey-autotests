@@ -36,6 +36,14 @@ class MainPage(BasePage):
     MODEL_PICKER_TRIGGER = ".prompt-form__body button.model-picker-trigger"
     MODEL_PICKER_POPUP = ".model-picker-content"
 
+    # Footer под ответом — содержит (слева направо):
+    #   1) кнопку .model-picker-trigger с именем модели, которая ответила
+    #   2) иконочные кнопки (копировать / перегенерировать и т.п.)
+    # Это наш источник истины «какая нейронка реально ответила».
+    RESPONSE_MODEL_TRIGGER = (
+        ".response-actions-container button.model-picker-trigger"
+    )
+
     # ─── Сообщения в чате ───
     MESSAGE_PAIR = ".message-pair"
     USER_MESSAGE_TEXT = ".user-message-text"
@@ -123,6 +131,33 @@ class MainPage(BasePage):
 
     def get_current_model_name(self) -> str:
         return (self.model_picker_trigger().inner_text() or "").strip()
+
+    def select_model(self, model_name: str, timeout: int = 10_000):
+        """Открыть селектор и выбрать модель по точному имени.
+
+        Попап закрывается автоматически после выбора.
+        """
+        self.open_model_picker(timeout=timeout)
+        popup = self.model_picker_popup()
+        option = popup.get_by_text(model_name, exact=True).first
+        expect(option).to_be_visible(timeout=timeout)
+        option.click()
+        self.model_picker_popup().wait_for(state="hidden", timeout=5_000)
+        expect(self.model_picker_trigger()).to_have_text(model_name, timeout=timeout)
+        return self
+
+    def response_model_trigger(self) -> Locator:
+        return self.page.locator(self.RESPONSE_MODEL_TRIGGER).first
+
+    def wait_for_response_model_trigger(self, timeout: int = 90_000):
+        """Ждём, пока под ответом появится кнопка с именем модели."""
+        trigger = self.response_model_trigger()
+        trigger.wait_for(state="visible", timeout=timeout)
+        expect(trigger).not_to_have_text("", timeout=timeout)
+        return self
+
+    def get_response_model_name(self) -> str:
+        return (self.response_model_trigger().inner_text() or "").strip()
 
     # ═══════════════════════════════════════════
     # ОТВЕТ АССИСТЕНТА
