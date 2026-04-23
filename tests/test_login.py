@@ -129,7 +129,7 @@ class TestLoginPositive:
         login_page.open()
         login_page.enter_email(settings.ADMIN_EMAIL)
         login_page.enter_password(settings.ADMIN_PASSWORD)
-        login_page.press_enter_in_password()
+        login_page.press_enter_in_password(wait_enabled=True)
         login_page.wait_for_login_success()
 
     @allure.title("Enter в поле email отправляет форму")
@@ -139,7 +139,7 @@ class TestLoginPositive:
         login_page.open()
         login_page.enter_email(settings.ADMIN_EMAIL)
         login_page.enter_password(settings.ADMIN_PASSWORD)
-        login_page.press_enter_in_email()
+        login_page.press_enter_in_email(wait_enabled=True)
         login_page.wait_for_login_success()
 
 

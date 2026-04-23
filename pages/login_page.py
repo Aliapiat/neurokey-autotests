@@ -41,7 +41,19 @@ class LoginPage(BasePage):
         self.fill(self.PASSWORD_INPUT, password)
         return self
 
+    def wait_for_login_button_enabled(self, timeout: int = 10_000):
+        """Ждём, пока React провалидирует форму и активирует кнопку.
+
+        До этого момента кнопка «Войти в аккаунт» стоит как disabled,
+        и клик по ней просто проглатывается браузером — форма не уходит,
+        а тест падает дальше по таймауту ожидания редиректа.
+        """
+        button = self.page.get_by_role("button", name="Войти в аккаунт")
+        expect(button).to_be_enabled(timeout=timeout)
+        return self
+
     def click_login(self):
+        self.wait_for_login_button_enabled()
         self.page.get_by_role("button", name="Войти в аккаунт").click()
         return self
 
@@ -51,11 +63,22 @@ class LoginPage(BasePage):
         self.click_login()
         return self
 
-    def press_enter_in_password(self):
+    def press_enter_in_password(self, wait_enabled: bool = False):
+        """Нажатие Enter в поле пароля.
+
+        По умолчанию ничего не ждём — чтобы негативные HTML5-тесты
+        (невалидный email, кнопка останется disabled) не падали по таймауту.
+        Для позитивных сценариев передайте `wait_enabled=True`, чтобы
+        дождаться активации кнопки и гарантированно отправить форму.
+        """
+        if wait_enabled:
+            self.wait_for_login_button_enabled()
         self.page.locator(self.PASSWORD_INPUT).press("Enter")
         return self
 
-    def press_enter_in_email(self):
+    def press_enter_in_email(self, wait_enabled: bool = False):
+        if wait_enabled:
+            self.wait_for_login_button_enabled()
         self.page.locator(self.EMAIL_INPUT).press("Enter")
         return self
 
