@@ -98,6 +98,29 @@ jobs:
             echo "password=${{ secrets.ADMIN_PASSWORD_DEV }}" >> $GITHUB_OUTPUT
           fi
 
+      # Не печатаем значения — только длины и безопасные флаги.
+      # Значения в env (не в bash-кавычках), чтобы пароль с ' или " не ломал скрипт.
+      # Если length=0 → в репозитории нет secrets с именами из шага выше
+      # (или они пустые). См. README по ADMIN_EMAIL_DEV / ADMIN_PASSWORD_DEV.
+      - name: 🔎 Diagnostics — credentials (masked, no values)
+        env:
+          _DIAG_EMAIL: ${{ steps.creds.outputs.email }}
+          _DIAG_PASSWORD: ${{ steps.creds.outputs.password }}
+        run: |
+          set -e
+          echo "matrix.env=${{ matrix.env }}"
+          echo "github.event_name=${{ github.event_name }}"
+          echo "ADMIN_EMAIL length (chars)=${#_DIAG_EMAIL}"
+          echo "ADMIN_PASSWORD length (chars)=${#_DIAG_PASSWORD}"
+          if [[ "$_DIAG_EMAIL" == *"@"* ]]; then echo 'email_contains_@=yes'; else echo 'email_contains_@=no (unexpected for email)'; fi
+          if [[ "$_DIAG_EMAIL" =~ ^[[:space:]] ]]; then echo 'email_leading_whitespace=YES (fix secret in GitHub)'; else echo 'email_leading_whitespace=no'; fi
+          if [[ "$_DIAG_EMAIL" =~ [[:space:]]$ ]]; then echo 'email_trailing_whitespace=YES (fix secret in GitHub)'; else echo 'email_trailing_whitespace=no'; fi
+          if [[ "$_DIAG_PASSWORD" =~ ^[[:space:]] ]]; then echo 'password_leading_whitespace=YES (fix secret in GitHub)'; else echo 'password_leading_whitespace=no'; fi
+          if [[ "$_DIAG_PASSWORD" =~ [[:space:]]$ ]]; then echo 'password_trailing_whitespace=YES (fix secret in GitHub)'; else echo 'password_trailing_whitespace=no'; fi
+          if [ "${#_DIAG_EMAIL}" -eq 0 ] || [ "${#_DIAG_PASSWORD}" -eq 0 ]; then
+            echo "::warning::ADMIN_EMAIL or ADMIN_PASSWORD is empty after resolve. For dev matrix add repository secrets ADMIN_EMAIL_DEV and ADMIN_PASSWORD_DEV (see workflow «Resolve credentials»)."
+          fi
+
       - name: 🎭 Run tests
         continue-on-error: true
         run: |
