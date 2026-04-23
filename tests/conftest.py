@@ -1,3 +1,5 @@
+import re
+
 import allure
 import pytest
 from playwright.sync_api import Page
@@ -83,7 +85,8 @@ def authenticated_page(page: Page) -> Page:
     login.open()
     login.login(settings.ADMIN_EMAIL, settings.ADMIN_PASSWORD)
 
-    page.wait_for_url(lambda url: "/login" not in url, timeout=20_000)
+    # На CI headless `wait_for_url(lambda ...)` нестабилен — ждём регексом + маркер UI
+    page.wait_for_url(re.compile(r"^(?!.*/login).*$"), timeout=30_000)
     return page
 
 

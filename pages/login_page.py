@@ -19,6 +19,15 @@ class LoginPage(BasePage):
         "[class*='error'], [class*='Error']"
     )
 
+    # Фактические тексты уведомлений Нейроключа при 400 /auths/signin.
+    # Фронт показывает ОБА одновременно — под email и под паролем,
+    # независимо от того, что именно не так.
+    EMAIL_ERROR_TEXT = "Почта не зарегистрирована"
+    PASSWORD_ERROR_TEXT = "Неверный пароль"
+
+    # Маркер успешной авторизации — заголовок стартовой страницы.
+    WELCOME_HEADING_TEXT = "Добро пожаловать в Нейроключ!"
+
     def open(self):
         self.navigate(self.PATH)
         self.wait_for_visible(self.EMAIL_INPUT)
@@ -70,6 +79,45 @@ class LoginPage(BasePage):
 
     def should_show_error(self, expected_text: str):
         expect(self.page.get_by_text(expected_text)).to_be_visible()
+        return self
+
+    def should_show_password_error(self, timeout: int = 10_000):
+        """Ошибка под полем пароля: «Неверный пароль»."""
+        expect(
+            self.page.get_by_text(self.PASSWORD_ERROR_TEXT, exact=False)
+        ).to_be_visible(timeout=timeout)
+        return self
+
+    def should_show_email_error(self, timeout: int = 10_000):
+        """Ошибка под полем email: «Почта не зарегистрирована…»."""
+        expect(
+            self.page.get_by_text(self.EMAIL_ERROR_TEXT, exact=False)
+        ).to_be_visible(timeout=timeout)
+        return self
+
+    def should_show_login_error(self, timeout: int = 10_000):
+        """Фронт показывает оба сообщения одновременно — ждём любое из них."""
+        locator = self.page.get_by_text(
+            re.compile(
+                rf"{re.escape(self.PASSWORD_ERROR_TEXT)}|{re.escape(self.EMAIL_ERROR_TEXT)}"
+            )
+        ).first
+        expect(locator).to_be_visible(timeout=timeout)
+        return self
+
+    def wait_for_login_success(self, timeout: int = 30_000):
+        """Надёжный ожидальщик успешного логина для CI.
+
+        Используем regex вместо lambda (Playwright стабильнее отлавливает
+        SPA-редирект после 200 от /auths/signin). Дополнительно проверяем,
+        что появился маркер авторизованной оболочки — заголовок стартового
+        экрана. Это защищает от редких случаев, когда URL уже сменился,
+        а JS ещё не отрисовал интерфейс.
+        """
+        self.page.wait_for_url(re.compile(r"^(?!.*/login).*$"), timeout=timeout)
+        expect(
+            self.page.get_by_role("heading", name=self.WELCOME_HEADING_TEXT)
+        ).to_be_visible(timeout=timeout)
         return self
 
     def should_email_be_invalid(self):

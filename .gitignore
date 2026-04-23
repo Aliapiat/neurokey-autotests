@@ -30,6 +30,7 @@ htmlcov/
 # ── Allure ─────────────────────────────
 allure-results/
 allure-report/
+data_suites*.csv
 
 # ── Playwright ─────────────────────────
 playwright-report/

@@ -80,7 +80,7 @@ class TestLoginInvalid:
         login_page.open()
         login_page.login("e2e@example.com", "secret")
         login_page.page.wait_for_url(
-            lambda url: "/login" not in url, timeout=15_000
+            re.compile(r"^(?!.*/login).*$"), timeout=15_000
         )
 
 
@@ -99,6 +99,4 @@ class TestRealLogin:
 
         login_page.open()
         login_page.login(settings.ADMIN_EMAIL, settings.ADMIN_PASSWORD)
-        login_page.page.wait_for_url(
-            lambda url: "/login" not in url, timeout=20_000
-        )
+        login_page.wait_for_login_success()

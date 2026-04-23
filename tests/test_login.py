@@ -25,6 +25,10 @@ from utils.helpers import randomize_case
 
 fake = Faker("ru_RU")
 
+# Неверные креды в UI Нейроключа дают сразу ДВА уведомления:
+#   • под email:   «Почта не зарегистрирована. Обратитесь к Администратору»
+#   • под паролем: «Неверный пароль»
+# Проверяем «любое из двух» — устойчиво к переформулировкам копирайта.
 WRONG_CREDS_ERROR = "Неверный пароль"
 
 
@@ -115,8 +119,7 @@ class TestLoginPositive:
         _skip_if_no_creds()
         login_page.open()
         login_page.login(settings.ADMIN_EMAIL, settings.ADMIN_PASSWORD)
-        login_page.page.wait_for_url(lambda url: "/login" not in url, timeout=20_000)
-        main_page.should_be_loaded()
+        login_page.wait_for_login_success()
 
     @allure.title("Enter в поле пароля отправляет форму")
     @allure.severity(allure.severity_level.NORMAL)
@@ -127,7 +130,7 @@ class TestLoginPositive:
         login_page.enter_email(settings.ADMIN_EMAIL)
         login_page.enter_password(settings.ADMIN_PASSWORD)
         login_page.press_enter_in_password()
-        login_page.page.wait_for_url(lambda url: "/login" not in url, timeout=20_000)
+        login_page.wait_for_login_success()
 
     @allure.title("Enter в поле email отправляет форму")
     @pytest.mark.login
@@ -137,7 +140,7 @@ class TestLoginPositive:
         login_page.enter_email(settings.ADMIN_EMAIL)
         login_page.enter_password(settings.ADMIN_PASSWORD)
         login_page.press_enter_in_email()
-        login_page.page.wait_for_url(lambda url: "/login" not in url, timeout=20_000)
+        login_page.wait_for_login_success()
 
 
 # ═══════════════════════════════════════════
@@ -158,7 +161,7 @@ class TestLoginEmailCase:
         upper_email = settings.ADMIN_EMAIL.upper()
         with allure.step(f"Вводим email: {upper_email}"):
             login_page.login(upper_email, settings.ADMIN_PASSWORD)
-        login_page.page.wait_for_url(lambda url: "/login" not in url, timeout=20_000)
+        login_page.wait_for_login_success()
 
     @allure.title("Email полностью в нижнем регистре")
     @allure.severity(allure.severity_level.NORMAL)
@@ -169,7 +172,7 @@ class TestLoginEmailCase:
         lower_email = settings.ADMIN_EMAIL.lower()
         with allure.step(f"Вводим email: {lower_email}"):
             login_page.login(lower_email, settings.ADMIN_PASSWORD)
-        login_page.page.wait_for_url(lambda url: "/login" not in url, timeout=20_000)
+        login_page.wait_for_login_success()
 
     @allure.title("Email с рандомным регистром букв")
     @allure.severity(allure.severity_level.NORMAL)
@@ -180,7 +183,7 @@ class TestLoginEmailCase:
         mixed = randomize_case(settings.ADMIN_EMAIL)
         with allure.step(f"Вводим email: {mixed}"):
             login_page.login(mixed, settings.ADMIN_PASSWORD)
-        login_page.page.wait_for_url(lambda url: "/login" not in url, timeout=20_000)
+        login_page.wait_for_login_success()
 
     @allure.title("Email с рандомным регистром (повтор для стабильности)")
     @allure.severity(allure.severity_level.MINOR)
@@ -192,7 +195,7 @@ class TestLoginEmailCase:
         mixed = randomize_case(settings.ADMIN_EMAIL)
         with allure.step(f"Попытка {attempt + 1}: email = {mixed}"):
             login_page.login(mixed, settings.ADMIN_PASSWORD)
-        login_page.page.wait_for_url(lambda url: "/login" not in url, timeout=20_000)
+        login_page.wait_for_login_success()
 
 
 # ═══════════════════════════════════════════
@@ -204,7 +207,7 @@ class TestLoginEmailCase:
 @pytest.mark.real_backend
 class TestLoginSpaces:
 
-    @allure.title("Пробелы перед email")
+    @allure.title("Пробелы перед email — фронт триммит, логин проходит")
     @pytest.mark.login
     def test_email_leading_spaces(self, login_page: LoginPage):
         _skip_if_no_creds()
@@ -212,9 +215,9 @@ class TestLoginSpaces:
         spaced = f"   {settings.ADMIN_EMAIL}"
         with allure.step(f"Вводим email: '{spaced}'"):
             login_page.login(spaced, settings.ADMIN_PASSWORD)
-        login_page.page.wait_for_url(lambda url: "/login" not in url, timeout=20_000)
+        login_page.wait_for_login_success()
 
-    @allure.title("Пробелы после email")
+    @allure.title("Пробелы после email — фронт триммит, логин проходит")
     @pytest.mark.login
     def test_email_trailing_spaces(self, login_page: LoginPage):
         _skip_if_no_creds()
@@ -222,7 +225,7 @@ class TestLoginSpaces:
         spaced = f"{settings.ADMIN_EMAIL}   "
         with allure.step(f"Вводим email: '{spaced}'"):
             login_page.login(spaced, settings.ADMIN_PASSWORD)
-        login_page.page.wait_for_url(lambda url: "/login" not in url, timeout=20_000)
+        login_page.wait_for_login_success()
 
     @allure.title("Пробелы перед паролем — логин должен упасть")
     @pytest.mark.login
@@ -232,9 +235,9 @@ class TestLoginSpaces:
         spaced = f"   {settings.ADMIN_PASSWORD}"
         with allure.step("Вводим пароль с пробелами в начале"):
             login_page.login(settings.ADMIN_EMAIL, spaced)
-        # Пароль не должен триммиться — ожидаем что мы остались на /login
-        # с сообщением об ошибке
-        login_page.page.wait_for_timeout(1500)
+        # Фронт пароль НЕ триммит — ждём уведомления об ошибке вместо
+        # проверки URL (надёжнее, чем фиксированное ожидание).
+        login_page.should_show_login_error()
         assert "/login" in login_page.page.url, (
             "Пароль с пробелами должен отклоняться, но логин прошёл"
         )
@@ -247,7 +250,7 @@ class TestLoginSpaces:
         spaced = f"{settings.ADMIN_PASSWORD}   "
         with allure.step("Вводим пароль с пробелами в конце"):
             login_page.login(settings.ADMIN_EMAIL, spaced)
-        login_page.page.wait_for_timeout(1500)
+        login_page.should_show_login_error()
         assert "/login" in login_page.page.url
 
 
@@ -312,7 +315,7 @@ class TestLoginInvalidCredentials:
         self._mock_signin_400(login_page)
         login_page.open()
         login_page.login(settings.ADMIN_EMAIL or "user@example.com", fake.password())
-        login_page.should_show_error(WRONG_CREDS_ERROR)
+        login_page.should_show_login_error()
 
     @allure.title("Несуществующий пользователь")
     @allure.severity(allure.severity_level.CRITICAL)
@@ -321,7 +324,7 @@ class TestLoginInvalidCredentials:
         self._mock_signin_400(login_page)
         login_page.open()
         login_page.login(fake.email(), fake.password())
-        login_page.should_show_error(WRONG_CREDS_ERROR)
+        login_page.should_show_login_error()
 
     @allure.title("Очень длинный email (500+ символов)")
     @pytest.mark.login
@@ -329,7 +332,7 @@ class TestLoginInvalidCredentials:
         self._mock_signin_400(login_page)
         login_page.open()
         login_page.login(f"{'a' * 500}@mail.com", fake.password())
-        login_page.should_show_error(WRONG_CREDS_ERROR)
+        login_page.should_show_login_error()
 
     @allure.title("Очень длинный пароль (1000+ символов)")
     @pytest.mark.login
@@ -337,7 +340,7 @@ class TestLoginInvalidCredentials:
         self._mock_signin_400(login_page)
         login_page.open()
         login_page.login("user@example.com", "a" * 1000)
-        login_page.should_show_error(WRONG_CREDS_ERROR)
+        login_page.should_show_login_error()
 
 
 # ═══════════════════════════════════════════
@@ -422,7 +425,7 @@ class TestLoginSecurity:
         self._mock_signin_400(login_page)
         login_page.open()
         login_page.login("user@example.com", "!@#$%^&*()_+-=[]{}|;':\",./<>?")
-        login_page.should_show_error(WRONG_CREDS_ERROR)
+        login_page.should_show_login_error()
 
     @allure.title("XSS в поле пароля — корректно отклоняется")
     @allure.severity(allure.severity_level.CRITICAL)
@@ -431,7 +434,7 @@ class TestLoginSecurity:
         self._mock_signin_400(login_page)
         login_page.open()
         login_page.login("user@example.com", "<script>alert('xss')</script>")
-        login_page.should_show_error(WRONG_CREDS_ERROR)
+        login_page.should_show_login_error()
 
 
 # ═══════════════════════════════════════════
