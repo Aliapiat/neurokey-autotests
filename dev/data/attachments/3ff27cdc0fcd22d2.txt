@@ -1,0 +1,3 @@
+/home/runner/work/neurokey-autotests/neurokey-autotests/reports/model_response_times.csv
+
+{'env': 'dev', 'model': 'GigaChat 2 Pro', 'prompt': 'board seven agent', 'balance_before': 7970.744, 'chat_id': '39a139df-d181-4700-9a0b-0a231772f1a9', 'first_completion_ms': 6129, 'total_ms': 6132, 'balance_after': 7970.1523, 'tokens_spent': 0.5917, 'timestamp_utc': '2026-04-24T05:06:33Z', 'status': 'passed', 'error': '', 'prompt_len': 17}

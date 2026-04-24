@@ -1,0 +1,3 @@
+/home/runner/work/neurokey-autotests/neurokey-autotests/reports/model_response_times.csv
+
+{'env': 'dev', 'model': 'DeepSeek V3.2', 'prompt': 'no everybody laugh', 'balance_before': 7970.8588, 'chat_id': 'd6c33ae3-1b51-4e08-9dfc-53605382d3b6', 'first_completion_ms': 11310, 'total_ms': 11315, 'balance_after': 7970.744, 'tokens_spent': 0.1148, 'timestamp_utc': '2026-04-24T05:06:23Z', 'status': 'passed', 'error': '', 'prompt_len': 18}

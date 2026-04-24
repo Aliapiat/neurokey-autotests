@@ -1,0 +1,3 @@
+/home/runner/work/neurokey-autotests/neurokey-autotests/reports/model_response_times.csv
+
+{'env': 'dev', 'model': 'YandexGPT 5.1 Pro', 'prompt': 'control probably theory', 'balance_before': 7970.1298, 'chat_id': 'b35f4a9f-274f-4afd-b726-0bba3f32d968', 'first_completion_ms': 7381, 'total_ms': 7383, 'balance_after': 7969.1164, 'tokens_spent': 1.0134, 'timestamp_utc': '2026-04-24T05:07:09Z', 'status': 'passed', 'error': '', 'prompt_len': 23}
