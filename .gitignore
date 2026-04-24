@@ -36,6 +36,9 @@ data_suites*.csv
 playwright-report/
 test-results/
 
+# ── Test metrics (CSV-журнал времени ответов моделей) ──
+reports/
+
 # ── IDE ────────────────────────────────
 .idea/
 .vscode/

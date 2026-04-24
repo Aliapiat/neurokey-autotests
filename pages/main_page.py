@@ -1,8 +1,53 @@
 import re
+import time
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Iterator, List, Optional
 
-from playwright.sync_api import Locator, expect
+from playwright.sync_api import Locator, Response, expect
 
 from pages.base_page import BasePage
+
+
+@dataclass(frozen=True)
+class CompletionsResult:
+    """Результат ожидания двух POST /api/chat/completions.
+
+    Поля `*_done_at` — это `time.perf_counter()` в момент, когда у
+    соответствующего Response.finished() вернулось управление, т.е.
+    тело ответа полностью прочитано. Их удобно вычитать из
+    `t_send`, который тест фиксирует перед `send_message`, чтобы
+    получить «сколько прошло от клика Enter до готового ответа».
+    """
+
+    first: Response
+    second: Response
+    first_done_at: float
+    second_done_at: float
+
+
+@dataclass(frozen=True)
+class BalanceSnapshot:
+    """Срез баланса организации в конкретный момент.
+
+    Соответствует схеме ответа `GET /api/v1/organizations/my/balance`:
+        {
+          "organization_id": "...",
+          "organization_name": "WMT",
+          "credit_limit": 10000,
+          "credits_used": 2022.7064,
+          "credits_remaining": 7977.2936,
+          "is_demo": false,
+          "status": "ok"
+        }
+    """
+
+    credits_remaining: float
+    credits_used: float
+    credit_limit: float
+    organization_id: str
+    organization_name: str
+    is_demo: bool
 
 
 class MainPage(BasePage):
@@ -53,6 +98,29 @@ class MainPage(BasePage):
     CHAT_URL_PATTERN = re.compile(
         r"/chat/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
     )
+    CHAT_ID_PATTERN = re.compile(
+        r"/chat/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+    )
+
+    # Точки контакта с бэкендом для ожидания ответа модели.
+    # На каждое отправленное сообщение фронт делает ДВА POST-а:
+    #   1) `/api/chat/completions` со `stream: true` — собственно SSE-ответ
+    #      модели (chunks с `chat.completion.chunk`, финальный `[DONE]`);
+    #   2) `/api/chat/completions` (уже без stream) — короткий запрос на
+    #      генерацию заголовка чата (возвращает объект `chat.completion`).
+    # Стабильное состояние чата (заголовок в сайдбаре, сохранённая история)
+    # наступает только ПОСЛЕ того, как прошёл второй запрос.
+    COMPLETIONS_URL_SUBSTRING = "/api/chat/completions"
+    # Endpoint для удаления чата по uuid — используется в teardown-фикстурах.
+    CHATS_DELETE_URL_TEMPLATE = "/api/v1/chats/{chat_id}"
+    # Баланс кредитов организации — фронт сам дёргает этот GET после
+    # каждого `/api/chat/completions`, чтобы обновить .subscription-badge.
+    BALANCE_URL = "/api/v1/organizations/my/balance"
+    # UI-виджет с балансом (sanity-check: что пользователь реально видит).
+    # Значение отформатировано по-русски: '7&nbsp;980,433' — неразрывный
+    # пробел как разделитель тысяч, запятая как десятичный разделитель.
+    BALANCE_UI_VALUE = ".subscription-badge__value"
+    BALANCE_UI_LABEL = ".subscription-badge__label"
 
     # ═══════════════════════════════════════════
     # НАВИГАЦИЯ
@@ -226,3 +294,253 @@ class MainPage(BasePage):
 
     def get_scroll_width(self) -> int:
         return self.page.evaluate("() => document.documentElement.scrollWidth")
+
+    # ═══════════════════════════════════════════
+    # CHAT ID / CLEANUP API
+    # ═══════════════════════════════════════════
+
+    def get_current_chat_id(self) -> Optional[str]:
+        """Достать uuid чата из URL `/chat/<uuid>`.
+
+        Возвращает None, если мы ещё не на странице конкретного чата.
+        """
+        match = self.CHAT_ID_PATTERN.search(self.page.url)
+        return match.group(1) if match else None
+
+    def delete_chat_via_api(self, chat_id: str) -> dict:
+        """Удалить чат по uuid через `DELETE /api/v1/chats/<uuid>`.
+
+        Запрос идёт из контекста самой страницы (`page.evaluate` + fetch),
+        поэтому автоматически подцепляются сессионные cookies, как и у UI.
+
+        Возвращает dict `{ok: bool, status: int}` с результатом, ничего не
+        роняет — решение, падать или нет, принимает вызывающий код (обычно
+        это teardown-фикстура, которой важно сохранить состояние теста).
+        """
+        if not chat_id:
+            return {"ok": False, "status": 0, "error": "empty chat_id"}
+        # Дополнительный страховочный чек: бэкенд отдаёт только uuid v4,
+        # и мы ни при каких обстоятельствах не хотим дёрнуть DELETE на
+        # что-то произвольное, что могло приехать из URL.
+        if not re.match(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            chat_id,
+        ):
+            return {"ok": False, "status": 0, "error": f"invalid uuid: {chat_id!r}"}
+
+        url = self.CHATS_DELETE_URL_TEMPLATE.format(chat_id=chat_id)
+        return self.page.evaluate(
+            """
+            (url) => fetch(url, {
+                method: 'DELETE',
+                credentials: 'include',
+                headers: { 'Accept': 'application/json' },
+            })
+            .then(r => ({ ok: r.ok, status: r.status }))
+            .catch(e => ({ ok: false, status: 0, error: String(e) }))
+            """,
+            url,
+        )
+
+    # ═══════════════════════════════════════════
+    # ОЖИДАНИЕ ДВУХ COMPLETION-ЗАПРОСОВ
+    # ═══════════════════════════════════════════
+
+    @contextmanager
+    def capture_completions(self) -> Iterator[List[Response]]:
+        """Контекст, который копит все `POST /api/chat/completions`
+        ответы, приходящие на страницу, пока мы внутри `with`-блока.
+
+        Использование:
+            with main.capture_completions() as completions:
+                main.send_message(prompt)
+                main.wait_for_two_completions(completions, timeout_ms=180_000)
+
+        Подписку обязательно поднимать ДО `send_message` — иначе есть риск
+        пропустить очень быстрый первый ответ (актуально для локальных
+        моделей и для повторных прогонов с кэшем).
+        """
+        collected: List[Response] = []
+
+        def _on_response(response: Response) -> None:
+            try:
+                if (
+                    response.request.method == "POST"
+                    and self.COMPLETIONS_URL_SUBSTRING in response.url
+                ):
+                    collected.append(response)
+            except Exception:
+                # response.request может упасть, если контекст страницы
+                # уже закрыт — на жизнь теста это не влияет, просто игнорим.
+                pass
+
+        self.page.on("response", _on_response)
+        try:
+            yield collected
+        finally:
+            try:
+                self.page.remove_listener("response", _on_response)
+            except Exception:
+                pass
+
+    def wait_for_two_completions(
+        self,
+        collected: List[Response],
+        *,
+        timeout_ms: int = 180_000,
+        poll_interval_ms: int = 500,
+    ) -> CompletionsResult:
+        """Явное ожидание ДВУХ ответов `POST /api/chat/completions`.
+
+        Это не «sleep на N секунд», а ожидание условия `len(collected) >= 2`
+        с периодической проверкой. `Response.finished()` дополнительно
+        гарантирует, что тело (в т.ч. стрим SSE у первого и короткий JSON
+        у второго) прочитано до конца — именно после этого в UI появляется
+        финальный заголовок и футер с именем модели.
+
+        В тестах на медленных моделях (YandexGPT, GigaChat, image-пайп)
+        таймаут надо поднимать. По умолчанию 180с — эмпирически с запасом.
+
+        Возвращает `CompletionsResult` с обоими Response-ами и
+        монотонными отметками времени `first_done_at` / `second_done_at`.
+        Их не нужно сравнивать между собой по значению — только вычитать
+        из зафиксированного тестом `t_send` (time.perf_counter() до
+        `send_message`), чтобы получить миллисекунды отклика.
+        """
+        deadline = time.monotonic() + timeout_ms / 1000
+        while time.monotonic() < deadline:
+            if len(collected) >= 2:
+                first, second = collected[0], collected[1]
+                try:
+                    first.finished()
+                except Exception:
+                    pass
+                first_done_at = time.perf_counter()
+                try:
+                    second.finished()
+                except Exception:
+                    pass
+                second_done_at = time.perf_counter()
+                return CompletionsResult(
+                    first=first,
+                    second=second,
+                    first_done_at=first_done_at,
+                    second_done_at=second_done_at,
+                )
+            # Это не «timeout», это интервал polling'а условия. Playwright
+            # сам предоставляет sync-овое ожидание, другой кооперативной
+            # паузы в нём нет. Сам deadline — у цикла выше.
+            self.page.wait_for_timeout(poll_interval_ms)
+
+        raise AssertionError(
+            f"Не дождались двух POST {self.COMPLETIONS_URL_SUBSTRING} "
+            f"за {timeout_ms} ms (получено {len(collected)}). "
+            "Возможно, модель не ответила или упала на бэке."
+        )
+
+    # ═══════════════════════════════════════════
+    # БАЛАНС КРЕДИТОВ
+    # ═══════════════════════════════════════════
+
+    def get_balance(self) -> BalanceSnapshot:
+        """Сходить в `GET /api/v1/organizations/my/balance` из контекста
+        страницы (cookies сессии прилетают сами) и вернуть разобранный снимок.
+        """
+        raw = self.page.evaluate(
+            """
+            async (url) => {
+                const r = await fetch(url, {
+                    method: 'GET',
+                    credentials: 'include',
+                    headers: { 'Accept': 'application/json' },
+                });
+                return { status: r.status, body: await r.json() };
+            }
+            """,
+            self.BALANCE_URL,
+        )
+        status = raw.get("status") if isinstance(raw, dict) else None
+        body = raw.get("body") if isinstance(raw, dict) else None
+        if status != 200 or not isinstance(body, dict):
+            raise AssertionError(
+                f"Не смогли прочитать баланс: status={status}, body={body!r}"
+            )
+        try:
+            return BalanceSnapshot(
+                credits_remaining=float(body["credits_remaining"]),
+                credits_used=float(body["credits_used"]),
+                credit_limit=float(body["credit_limit"]),
+                organization_id=str(body.get("organization_id", "")),
+                organization_name=str(body.get("organization_name", "")),
+                is_demo=bool(body.get("is_demo", False)),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AssertionError(
+                f"Неожиданная схема ответа баланса: {body!r} ({exc})"
+            ) from exc
+
+    def get_balance_from_ui(self) -> Optional[float]:
+        """Прочитать баланс из виджета `.subscription-badge__value`.
+
+        Используется как sanity-check API против UI. Если виджет не
+        виден (например, на странице чата он может быть скрыт на узких
+        вьюпортах) — возвращаем None.
+
+        Парсинг: '7&nbsp;980,433' -> 7980.433
+        """
+        locator = self.page.locator(self.BALANCE_UI_VALUE).first
+        try:
+            if locator.count() == 0 or not locator.is_visible():
+                return None
+            raw = locator.inner_text() or ""
+        except Exception:
+            return None
+        return self._parse_ui_balance(raw)
+
+    @staticmethod
+    def _parse_ui_balance(raw: str) -> Optional[float]:
+        """Убираем все пробелы (обычные, неразрывные `\xa0`, тонкие `\u202f`)
+        и меняем запятую на точку перед `float()`."""
+        if raw is None:
+            return None
+        cleaned = (
+            raw.replace("\u00a0", "")
+            .replace("\u202f", "")
+            .replace(" ", "")
+            .replace(",", ".")
+            .strip()
+        )
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+
+    def wait_for_balance_change(
+        self,
+        baseline: BalanceSnapshot,
+        *,
+        timeout_ms: int = 15_000,
+        poll_interval_ms: int = 500,
+    ) -> BalanceSnapshot:
+        """Дождаться, пока `credits_remaining` отличается от `baseline`.
+
+        Бэкенд списывает токены не мгновенно после завершения
+        `/api/chat/completions`: сначала закрывается стрим, потом
+        usage-накладные из последнего chunk попадают в ledger, потом
+        баланс обновляется. На практике это единицы секунд. 15 с — с
+        хорошим запасом.
+
+        Если за deadline изменений не случилось — возвращаем последний
+        прочитанный снимок, и вызывающий код сам решает, это ошибка
+        или «модель ничего не стоила» (например, локальная/бесплатная).
+        """
+        deadline = time.monotonic() + timeout_ms / 1000
+        current = baseline
+        while time.monotonic() < deadline:
+            current = self.get_balance()
+            if current.credits_remaining != baseline.credits_remaining:
+                return current
+            self.page.wait_for_timeout(poll_interval_ms)
+        return current
