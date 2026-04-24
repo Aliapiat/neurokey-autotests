@@ -1,0 +1,3 @@
+/home/runner/work/neurokey-autotests/neurokey-autotests/reports/model_response_times.csv
+
+{'env': 'dev', 'model': 'Gemini 3.1 Pro Preview', 'prompt': 'meet political small', 'balance_before': 7960.1343, 'chat_id': '1cf8cf40-136c-4308-9ede-58f5eb60c222', 'first_completion_ms': 25683, 'total_ms': 25686, 'balance_after': 7952.616, 'tokens_spent': 7.5183, 'timestamp_utc': '2026-04-24T05:29:59Z', 'status': 'passed', 'error': '', 'prompt_len': 20}

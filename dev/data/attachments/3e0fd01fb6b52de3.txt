@@ -1,0 +1,4 @@
+API credits_remaining: 7952.0317
+API credits_used:      2047.9683
+API credit_limit:      10000.0
+UI .subscription-badge: None

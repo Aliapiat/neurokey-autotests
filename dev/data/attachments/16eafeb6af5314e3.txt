@@ -1,0 +1,3 @@
+/home/runner/work/neurokey-autotests/neurokey-autotests/reports/model_response_times.csv
+
+{'env': 'dev', 'model': 'Claude Sonnet 4.6', 'prompt': 'although job card', 'balance_before': 7960.9564, 'chat_id': '83c44ab5-8159-4771-9a22-99780e604e5b', 'first_completion_ms': 7872, 'total_ms': 7875, 'balance_after': 7960.1343, 'tokens_spent': 0.8221, 'timestamp_utc': '2026-04-24T05:29:29Z', 'status': 'passed', 'error': '', 'prompt_len': 17}

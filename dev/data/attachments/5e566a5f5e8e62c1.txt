@@ -1,0 +1,3 @@
+/home/runner/work/neurokey-autotests/neurokey-autotests/reports/model_response_times.csv
+
+{'env': 'dev', 'model': 'DeepSeek V3.2', 'prompt': 'your will performance', 'balance_before': 7952.1326, 'chat_id': 'a4e8aac9-a58d-4241-8c23-728056c146e6', 'first_completion_ms': 20224, 'total_ms': 20226, 'balance_after': 7952.0317, 'tokens_spent': 0.1009, 'timestamp_utc': '2026-04-24T05:30:43Z', 'status': 'passed', 'error': '', 'prompt_len': 21}
