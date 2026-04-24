@@ -76,7 +76,17 @@ ERROR_MARKERS = (
 # быстрые модели (Claude Haiku, Llama) укладываются в единицы секунд,
 # но мы параметризуем тесты на ВСЕ модели, и общий потолок должен
 # покрывать самую долгую. Если упрёмся — значит проблема на бэке.
-COMPLETIONS_TIMEOUT_MS = 180_000
+COMPLETIONS_TIMEOUT_MS = 240_000
+
+# Таймаут ожидания UI-реакций, которые триггерятся ПОСЛЕ `send_message`:
+# - смена URL на /chat/<uuid>,
+# - отрисовка сообщения пользователя в истории,
+# - отрисовка блока ответа ассистента,
+# - появление футера `.response-actions-container` с именем модели.
+# Все эти события на холодном CI/медленном бэкенде наступают с ощутимой
+# задержкой (React-рендер + /api/v1/chats/new + обновление сайдбара),
+# поэтому стандартный 10-15с Playwright-овский таймаут нам тесен.
+POST_SEND_UI_TIMEOUT = 60_000
 
 
 @allure.epic("Модели")
@@ -101,8 +111,8 @@ class TestModelAnswers:
         with allure.step("1. Открыть главную и закрыть онбординг-попап"):
             main.open()
             main.dismiss_group_chats_popup()
-            main.should_be_loaded()
-            main.should_show_chat_input()
+            main.should_be_loaded(timeout=30_000)
+            main.should_show_chat_input(timeout=30_000)
 
         with allure.step(f"2. Выбрать в композере модель {model_name!r}"):
             main.select_model(model_name)
@@ -155,7 +165,10 @@ class TestModelAnswers:
                 main.send_message(prompt, submit_with="enter")
 
             with allure.step("4. URL должен смениться на /chat/<uuid>"):
-                main.wait_for_chat_url(timeout=20_000)
+                # На медленных моделях фронт меняет URL не сразу — ждёт,
+                # пока `/api/v1/chats/new` вернёт id. Поэтому пугаться
+                # секунд 30-40 на YandexGPT/GigaChat нормально.
+                main.wait_for_chat_url(timeout=POST_SEND_UI_TIMEOUT)
                 expect(authenticated_page).to_have_url(main.CHAT_URL_PATTERN)
 
                 # Как только мы на /chat/<uuid> — это НАШ свежесозданный
@@ -173,7 +186,7 @@ class TestModelAnswers:
             with allure.step("5. Сообщение пользователя появилось в истории"):
                 expect(
                     authenticated_page.locator(main.USER_MESSAGE_TEXT).last
-                ).to_have_text(prompt, timeout=10_000)
+                ).to_have_text(prompt, timeout=POST_SEND_UI_TIMEOUT)
 
             with allure.step(
                 "6. Явное ожидание ДВУХ POST /api/chat/completions "
@@ -209,8 +222,8 @@ class TestModelAnswers:
             # wait_for_two_completions уже гарантирует, что стрим закрыт —
             # но React может ещё раз пересобрать DOM. Страхуемся expect.
             response_locator = authenticated_page.locator(main.ASSISTANT_RESPONSE).first
-            expect(response_locator).to_be_visible(timeout=30_000)
-            expect(response_locator).not_to_have_text("", timeout=30_000)
+            expect(response_locator).to_be_visible(timeout=POST_SEND_UI_TIMEOUT)
+            expect(response_locator).not_to_have_text("", timeout=POST_SEND_UI_TIMEOUT)
             response_text = (response_locator.inner_text() or "").strip()
             allure.attach(
                 response_text[:2000],
@@ -232,7 +245,10 @@ class TestModelAnswers:
         with allure.step(
             "8. Под ответом показано имя модели — и оно совпадает с выбранной"
         ):
-            main.wait_for_response_model_trigger(timeout=15_000)
+            # Футер `.response-actions-container` рендерится ПОСЛЕ title-gen
+            # и финализации chats/new — на холодном React-дереве ему нужно
+            # ощутимо больше, чем 15с, которые мы ставили ранее.
+            main.wait_for_response_model_trigger(timeout=POST_SEND_UI_TIMEOUT)
             actual = main.get_response_model_name()
             allure.attach(
                 f"Выбрали: {model_name}\nОтветила (по UI): {actual}",
@@ -248,10 +264,11 @@ class TestModelAnswers:
             "9. Баланс списался: credits_remaining уменьшился на > 0"
         ):
             # Ждём, пока бэк зачислит usage в ledger — обычно в пределах
-            # 1-3 секунд после закрытия стрима, иногда дольше на медленных
-            # моделях/платформах.
+            # 1-3 секунд после закрытия стрима, но на YandexGPT/GigaChat
+            # и на загруженном CI бывает 15-40с (биллинг батчится).
+            # 60с — компромисс, достаточный для всех моделей из DIALOG_MODELS.
             balance_after = main.wait_for_balance_change(
-                balance_before, timeout_ms=15_000
+                balance_before, timeout_ms=60_000
             )
             tokens_spent = round(
                 balance_before.credits_remaining - balance_after.credits_remaining,

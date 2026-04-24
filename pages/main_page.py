@@ -185,7 +185,7 @@ class MainPage(BasePage):
     def model_picker_popup(self) -> Locator:
         return self.page.locator(self.MODEL_PICKER_POPUP)
 
-    def open_model_picker(self, timeout: int = 10_000):
+    def open_model_picker(self, timeout: int = 20_000):
         trigger = self.model_picker_trigger()
         trigger.wait_for(state="visible", timeout=timeout)
         trigger.click()
@@ -200,7 +200,7 @@ class MainPage(BasePage):
     def get_current_model_name(self) -> str:
         return (self.model_picker_trigger().inner_text() or "").strip()
 
-    def select_model(self, model_name: str, timeout: int = 10_000):
+    def select_model(self, model_name: str, timeout: int = 20_000):
         """Открыть селектор и выбрать модель по точному имени.
 
         Попап закрывается автоматически после выбора.
@@ -210,7 +210,7 @@ class MainPage(BasePage):
         option = popup.get_by_text(model_name, exact=True).first
         expect(option).to_be_visible(timeout=timeout)
         option.click()
-        self.model_picker_popup().wait_for(state="hidden", timeout=5_000)
+        self.model_picker_popup().wait_for(state="hidden", timeout=10_000)
         expect(self.model_picker_trigger()).to_have_text(model_name, timeout=timeout)
         return self
 
@@ -521,7 +521,7 @@ class MainPage(BasePage):
         self,
         baseline: BalanceSnapshot,
         *,
-        timeout_ms: int = 15_000,
+        timeout_ms: int = 60_000,
         poll_interval_ms: int = 500,
     ) -> BalanceSnapshot:
         """Дождаться, пока `credits_remaining` отличается от `baseline`.
