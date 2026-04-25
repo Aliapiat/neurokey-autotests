@@ -9,7 +9,7 @@ from config.settings import settings
 from pages.login_page import LoginPage
 from pages.main_page import MainPage
 from utils.auth_storage import seed_fake_auth
-from utils.model_metrics import ModelMetricsRecorder, append_row, utc_now_iso
+from utils.model_metrics import ModelMetricsRecorder, append_row, local_now_iso
 
 
 # ═══════════════════════════════════════════
@@ -254,13 +254,12 @@ def model_metrics_recorder(request):
         error = ""
 
     row = recorder.snapshot()
-    row["timestamp_utc"] = utc_now_iso()
+    # Колонка A в CSV — локальное время прогона. UTC дополнительно
+    # пишется в колонку X (полезно для CI/международных коллабораций),
+    # но человек обычно смотрит в Excel и ожидает локальное время.
+    row.setdefault("timestamp_local", local_now_iso())
     row["status"] = status
     row["error"] = error
-
-    # prompt_len заполняется автоматически, если сам prompt есть.
-    if "prompt" in row and "prompt_len" not in row:
-        row["prompt_len"] = len(row["prompt"])
 
     try:
         path = append_row(row)

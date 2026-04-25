@@ -3,7 +3,7 @@
 
 1. Логинимся (фикстура `authenticated_page`).
 2. В композере открываем селектор моделей и выбираем целевую модель.
-3. Фейкером генерируем запрос из 3 слов и отправляем его.
+3. Фейкером (русская локаль) генерируем запрос из 2 слов и отправляем его.
 4. ЯВНО ждём, пока по сети пройдёт ДВА POST `/api/chat/completions`:
      - первый — streaming SSE с собственно ответом модели (`chat.completion.chunk`,
        финальный chunk с `finish_reason: "stop"` и затем `[DONE]`);
@@ -34,6 +34,7 @@ Image-модели (Nano Banana / GPT Image / Seedream) в этот параме
 дольше и проверяются они отдельным набором — см. отдельный issue.
 """
 
+import re
 import time
 
 import allure
@@ -41,19 +42,22 @@ import pytest
 from faker import Faker
 from playwright.sync_api import Page, expect
 
+from config.settings import settings
 from pages.main_page import MainPage
 from test_data.models import DIALOG_MODELS
 
 
-# Faker с дефолтной (англ.) локалью — слова короткие и гарантированно
-# читаются любой моделью, включая YandexGPT / GigaChat.
-fake = Faker()
+# Faker с русской локалью — на ru_RU методы `.words()` отдают слова
+# в нижнем регистре кириллицей, без пунктуации. Русский промпт лучше
+# отрабатывают локальные модели (YandexGPT / GigaChat) и заодно
+# тестирует, что фронт корректно проксирует UTF-8 в `/api/chat/completions`.
+fake = Faker("ru_RU")
 
 
-def _three_word_prompt() -> str:
-    """Ровно три слова, разделённые пробелом. Никакой пунктуации — чтобы
-    промпт был детерминированно из трёх слов."""
-    return " ".join(fake.words(nb=3))
+def _faker_prompt() -> str:
+    """Два русских слова, разделённых пробелом. Никакой пунктуации —
+    чтобы промпт был детерминированно из ровно двух токенов."""
+    return " ".join(fake.words(nb=2))
 
 
 # Типовые текстовые маркеры, которые фронт/бэк могут показать вместо
@@ -88,6 +92,217 @@ COMPLETIONS_TIMEOUT_MS = 240_000
 # поэтому стандартный 10-15с Playwright-овский таймаут нам тесен.
 POST_SEND_UI_TIMEOUT = 60_000
 
+# Ожидание обновления счётчика «Сегодня» в Настройках после ответа модели.
+# Бэкенд начисляет статистику АСИНХРОННО: для Sonnet/GPT учёт прилетает за
+# 1-3 секунды, для Opus/Gemini/GigaChat иногда уходит за 60+ секунд (видимо,
+# batch на стороне биллинга). 180с — верхний потолок: если за это время
+# счётчик так и не вырос — это уже похоже на баг учёта.
+COUNTER_POLL_TIMEOUT_S = 180
+COUNTER_POLL_STEP_MS = 4_000
+
+
+# Алиасы, под которыми та или иная модель показывается в карточке
+# «По нейросетям» в Настройки → Статистика использования.
+#
+# ВАЖНО: тут указываются ТОЛЬКО канонические слаги — ровно те строки,
+# которые реально отрисованы в DOM на /settings (проверено вручную
+# 2026-04-25, см. список ниже). Никаких display-name из селектора
+# композера и никаких «человеческих» вариаций — иначе матчинг становится
+# жадным и хватает текст из соседних карточек/тултипов.
+#
+# Если бэкенд однажды поменяет id (например, выкатит `claude-opus-5`),
+# тест упадёт явно с "счётчик 0", и это сигнал заходить в /settings и
+# обновлять словарь. Лучше явная поломка, чем мигающие зелёные.
+MODEL_STATS_ALIASES: dict[str, tuple[str, ...]] = {
+    "GPT-5.2":                  ("openai/gpt-5.2",),
+    "Claude Opus 4.6":          ("anthropic/claude-opus-4.6",),
+    "Claude Sonnet 4.6":        ("anthropic/claude-sonnet-4.6",),
+    "Gemini 3.1 Pro Preview":   ("google/gemini-3.1-pro-preview",),
+    "Grok 4.1 Fast":            ("x-ai/grok-4.1-fast",),
+    "DeepSeek V3.2":            ("deepseek/deepseek-v3.2",),
+    "GigaChat 2 Pro":           ("GigaChat-2-Pro",),
+    "Kimi K2.5":                ("moonshotai/kimi-k2.5",),
+    "YandexGPT 5.1 Pro":        ("yandexgpt-5.1",),
+}
+
+
+def _get_model_aliases(model_name: str) -> tuple[str, ...]:
+    """Все варианты написания имени модели в карточке статистики."""
+    configured = MODEL_STATS_ALIASES.get(model_name)
+    if configured:
+        return configured
+    return (model_name.lower(),)
+
+
+def _open_settings(page: Page) -> None:
+    """Перейти на `/settings` прямой навигацией.
+
+    Не зависит от состояния профильного дропдауна — устойчиво к гонкам
+    рендера/анимации Ant Tooltip. Каждый вызов перезагружает SPA-роут,
+    поэтому фронт точно перечитает статистику с бэка (своего автообновления
+    у страницы нет — без goto цифры в DOM «зависнут» на старом значении).
+    """
+    base = settings.BASE_URL.rstrip("/")
+    page.goto(f"{base}/settings", wait_until="domcontentloaded")
+    expect(
+        page.get_by_text(re.compile(r"настройки профиля", re.IGNORECASE)).first
+    ).to_be_visible(timeout=30_000)
+
+
+def _expand_stats_collapse(page: Page) -> None:
+    """Раскрыть Ant Collapse «Статистика использования», если он свёрнут.
+
+    Без раскрытия карточек моделей в секции «По нейросетям» в DOM нет
+    физически — Ant рендерит содержимое только при `aria-expanded=true`.
+    Поэтому до раскрытия любой `_read_model_requests_counter` вернёт 0
+    даже при реально существующих запросах.
+    """
+    page.evaluate(
+        r"""
+        () => {
+            const headers = Array.from(
+                document.querySelectorAll('.ant-collapse-header')
+            );
+            const target = headers.find(
+                (h) => /статистика\s+использования/i.test(h.textContent || '')
+            );
+            if (!target) return 'no-collapse';
+            if (target.getAttribute('aria-expanded') === 'true') {
+                return 'already-open';
+            }
+            target.click();
+            return 'expanded';
+        }
+        """
+    )
+    # Признак того, что секция реально раскрыта и данные подгружены —
+    # появилось «Всего запросов» (виден всегда, даже на нулевых данных).
+    expect(
+        page.get_by_text(re.compile(r"всего\s+запросов", re.IGNORECASE)).first
+    ).to_be_visible(timeout=15_000)
+
+
+def _read_total_today(page: Page) -> int:
+    """Прочитать глобальный счётчик «Сегодня: HH:MM, N запросов».
+
+    Это сводка из header'а Ant Collapse — фронт обновляет её одновременно
+    с карточками моделей, поэтому используем её как «индикатор свежести»:
+    если `total_after > total_before` — данные точно перечитаны.
+    """
+    raw = page.evaluate(
+        r"""
+        () => {
+            const summary = document.querySelector(
+                '.user-settings-stats-header-summary'
+            );
+            if (!summary) return null;
+            const match = (summary.textContent || '').match(/(\d+)\s+запрос/iu);
+            return match ? Number(match[1]) : null;
+        }
+        """
+    )
+    return int(raw) if raw is not None else 0
+
+
+def _read_model_requests_counter(
+    page: Page, aliases: tuple[str, ...]
+) -> int:
+    r"""Найти карточку модели в «По нейросетям» и достать число запросов.
+
+    Алгоритм (slug-anchored, idempotent):
+
+    1. На странице может быть много текстовых узлов вида «N запросов»
+       (по одному на каждую карточку модели + общая сводка). Сначала
+       собираем ВСЕ листовые элементы, у которых текст начинается с
+       «<число> запрос…» — это и есть «цифры в карточках».
+    2. Для каждой такой цифры поднимаемся вверх по DOM (не глубже 4
+       уровней) и ищем первого предка, чей `textContent` СОДЕРЖИТ один
+       из переданных слагов.
+    3. Стоп-условие подъёма — когда в предке встречается более одного
+       «(\d+) запрос…»: значит, это уже секция с несколькими
+       карточками, и наличие в ней нашего слага не означает, что наш
+       слаг соответствует ИМЕННО этой цифре. Дополнительно — hard-cap
+       по длине текста (> 400 символов): на всякий случай.
+
+    Если ни одна цифра не «прицепилась» к нужному слагу — возвращаем 0.
+    Это нормальное состояние для свежей учётки или модели, по которой
+    сегодня ещё ноль запросов; не падаем на ассерте раньше времени.
+
+    Старая версия функции искала наоборот — от слага вниз/вбок к цифре —
+    и регулярно подцепляла соседнюю карточку (топ-1 модель «съедала»
+    цифру у всех остальных, см. CSV от 2026-04-25). Новая идёт от
+    цифры — у каждой цифры один родитель-карточка, поэтому коллизий
+    больше нет.
+    """
+    normalized_aliases = [
+        alias.strip().lower() for alias in aliases if alias.strip()
+    ]
+    if not normalized_aliases:
+        return 0
+
+    result = page.evaluate(
+        r"""(aliases) => {
+            const norm = (s) => (s || '').trim().toLowerCase();
+            const targets = aliases.map(norm).filter(Boolean);
+
+            // 1) Собираем листовые узлы с текстом "(\d+) запрос(а|ов)?".
+            // Только листья, чтобы не цеплять контейнеры выше карточки.
+            const leaves = Array.from(document.querySelectorAll('*'))
+                .filter((el) => el.children.length === 0);
+            const counters = [];
+            for (const el of leaves) {
+                const txt = (el.textContent || '').trim();
+                const m = txt.match(/^(\d+)\s*запрос/iu);
+                if (m) counters.push({el, count: Number(m[1])});
+            }
+
+            // 2) Для каждой цифры идём вверх и ищем ближайшего предка,
+            //    у которого в тексте есть слаг модели.
+            //
+            //    Стоп-условие подъёма — когда в предке встречается
+            //    более одного «(\d+) запрос…»: это уже контейнер с
+            //    несколькими карточками, и матч слага в нём не значит,
+            //    что НАША карточка соответствует ЭТОЙ цифре.
+            for (const {el, count} of counters) {
+                let cur = el;
+                for (let depth = 0; depth < 4; depth++) {
+                    const parent = cur.parentElement;
+                    if (!parent) break;
+                    const parentText = norm(parent.textContent);
+                    const countHits = parentText.match(/\d+\s*запрос/giu) || [];
+                    if (countHits.length > 1) break;  // soft-cap по числу карточек
+                    if (parentText.length > 400) break;  // hard-cap на всякий случай
+                    if (targets.some((t) => parentText.includes(t))) {
+                        return {value: count};
+                    }
+                    cur = parent;
+                }
+            }
+            return {value: null};
+        }""",
+        normalized_aliases,
+    )
+
+    value = result.get("value") if isinstance(result, dict) else None
+    return int(value) if value is not None else 0
+
+
+def _snapshot_today_stats(
+    page: Page, aliases: tuple[str, ...]
+) -> tuple[int, int]:
+    """Открыть /settings, раскрыть статистику, вернуть `(total, model)`.
+
+    Полная навигация + раскрытие Collapse делается КАЖДЫЙ раз. Это дороже
+    клика по табу, зато надёжно: SPA-роут точно перечитает данные с бэка,
+    без тонких гонок Ant Segmented (повторный клик по тому же сегменту
+    у Ant — no-op, фронт не делает re-fetch).
+    """
+    _open_settings(page)
+    _expand_stats_collapse(page)
+    total = _read_total_today(page)
+    model = _read_model_requests_counter(page, aliases)
+    return total, model
+
 
 @allure.epic("Модели")
 @allure.feature("Каждая модель отвечает на запрос")
@@ -97,9 +312,9 @@ POST_SEND_UI_TIMEOUT = 60_000
 class TestModelAnswers:
 
     @pytest.mark.parametrize("model_name", DIALOG_MODELS, ids=DIALOG_MODELS)
-    @allure.title("{model_name} отвечает на запрос из 3 слов (faker)")
+    @allure.title("{model_name} отвечает на запрос из 2 русских слов (faker)")
     @allure.severity(allure.severity_level.CRITICAL)
-    def test_model_answers_three_word_prompt(
+    def test_model_answers_faker_prompt(
         self,
         authenticated_page: Page,
         chat_cleaner,
@@ -107,6 +322,30 @@ class TestModelAnswers:
         model_name: str,
     ):
         main = MainPage(authenticated_page)
+        aliases = _get_model_aliases(model_name)
+
+        with allure.step(
+            "0. Снапшот BEFORE: Настройки → Статистика → счётчик «Сегодня»"
+        ):
+            # Снимаем ДО самого теста: и глобальный счётчик «Сегодня:
+            # HH:MM, N запросов», и счётчик именно нашей модели в карточке
+            # «По нейросетям». Если карточки модели ещё нет — значит
+            # сегодня под неё было 0 запросов, считаем `model_before = 0`.
+            total_today_before, model_today_before = _snapshot_today_stats(
+                authenticated_page, aliases
+            )
+            allure.attach(
+                (
+                    f"total_today_before = {total_today_before}\n"
+                    f"{model_name}_today_before = {model_today_before}"
+                ),
+                name="Счётчики статистики ДО",
+                attachment_type=allure.attachment_type.TEXT,
+            )
+            model_metrics_recorder.set(
+                total_today_before=total_today_before,
+                model_today_before=model_today_before,
+            )
 
         with allure.step("1. Открыть главную и закрыть онбординг-попап"):
             main.open()
@@ -117,10 +356,10 @@ class TestModelAnswers:
         with allure.step(f"2. Выбрать в композере модель {model_name!r}"):
             main.select_model(model_name)
 
-        prompt = _three_word_prompt()
+        prompt = _faker_prompt()
         allure.attach(
             prompt,
-            name="Промпт (3 слова от faker)",
+            name="Промпт (2 русских слова от faker)",
             attachment_type=allure.attachment_type.TEXT,
         )
 
@@ -300,4 +539,68 @@ class TestModelAnswers:
                 f"{model_name}: списание {tokens_spent} больше, чем был "
                 f"на балансе {balance_before.credits_remaining}. "
                 "Похоже, что-то не так с биллингом."
+            )
+
+        with allure.step(
+            "10. Счётчик «Сегодня» в Настройках вырос ровно на +1"
+        ):
+            # Бэк начисляет статистику АСИНХРОННО, причём для разных моделей
+            # с разной задержкой: Sonnet/GPT — 1-3с, Opus/Gemini/GigaChat —
+            # иногда 60+с. Поэтому поллим /settings до тех пор, пока не
+            # увидим ровно +1 (и одновременно глобальный счётчик
+            # сдвинулся вперёд — это «индикатор свежести» данных).
+            expected_model_after = model_today_before + 1
+
+            deadline = time.monotonic() + COUNTER_POLL_TIMEOUT_S
+            attempts: list[str] = []
+            total_today_after = total_today_before
+            model_today_after = model_today_before
+
+            while time.monotonic() < deadline:
+                total_today_after, model_today_after = _snapshot_today_stats(
+                    authenticated_page, aliases
+                )
+                attempts.append(
+                    f"total={total_today_after} {model_name}={model_today_after}"
+                )
+                if (
+                    total_today_after > total_today_before
+                    and model_today_after >= expected_model_after
+                ):
+                    break
+                authenticated_page.wait_for_timeout(COUNTER_POLL_STEP_MS)
+
+            model_metrics_recorder.set(
+                total_today_after=total_today_after,
+                model_today_after=model_today_after,
+                requests_counter_delta=model_today_after - model_today_before,
+            )
+            allure.attach(
+                "\n".join(attempts),
+                name="Поллинг статистики (попытки)",
+                attachment_type=allure.attachment_type.TEXT,
+            )
+            allure.attach(
+                (
+                    f"total_today_before = {total_today_before}\n"
+                    f"total_today_after  = {total_today_after}\n"
+                    f"{model_name}_before = {model_today_before}\n"
+                    f"{model_name}_after  = {model_today_after}\n"
+                    f"expected_model_after = {expected_model_after}"
+                ),
+                name="Счётчики статистики ПОСЛЕ vs ДО",
+                attachment_type=allure.attachment_type.TEXT,
+            )
+
+            # Глобальный счётчик ОБЯЗАН вырасти — иначе бэк просто не учёл
+            # наш запрос (или фронт продолжает показывать кеш — но мы же
+            # на КАЖДОЙ итерации делаем page.goto, так что это исключено).
+            assert total_today_after > total_today_before, (
+                f"Глобальный счётчик «Сегодня» не вырос за "
+                f"{COUNTER_POLL_TIMEOUT_S}с: было {total_today_before}, "
+                f"осталось {total_today_after}. Бэк не учёл запрос."
+            )
+            assert model_today_after == expected_model_after, (
+                f"Счётчик {model_name} должен увеличиться на +1, "
+                f"но было {model_today_before}, стало {model_today_after}"
             )
