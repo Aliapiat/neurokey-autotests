@@ -1,0 +1,2 @@
+total_today_before = 65
+GigaChat 2 Pro_today_before = 5

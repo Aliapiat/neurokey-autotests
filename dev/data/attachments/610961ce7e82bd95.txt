@@ -1,0 +1,2 @@
+total_today_before = 60
+Claude Opus 4.6_today_before = 6

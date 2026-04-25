@@ -1,0 +1,5 @@
+total_today_before = 66
+total_today_after  = 67
+Kimi K2.5_before = 6
+Kimi K2.5_after  = 7
+expected_model_after = 7

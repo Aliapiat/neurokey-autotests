@@ -1,0 +1,5 @@
+total_today_before = 61
+total_today_after  = 62
+Claude Sonnet 4.6_before = 8
+Claude Sonnet 4.6_after  = 9
+expected_model_after = 9

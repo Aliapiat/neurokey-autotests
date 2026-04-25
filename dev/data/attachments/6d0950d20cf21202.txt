@@ -1,0 +1,2 @@
+total_today_before = 63
+Grok 4.1 Fast_today_before = 7

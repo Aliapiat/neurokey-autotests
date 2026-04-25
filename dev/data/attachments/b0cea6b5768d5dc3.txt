@@ -1,0 +1,2 @@
+total_today_before = 64
+DeepSeek V3.2_today_before = 7

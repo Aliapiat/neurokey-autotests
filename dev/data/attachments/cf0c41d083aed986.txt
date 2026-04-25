@@ -1,0 +1,1 @@
+total=64 Grok 4.1 Fast=8

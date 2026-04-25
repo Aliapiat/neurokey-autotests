@@ -1,0 +1,5 @@
+total_today_before = 59
+total_today_after  = 60
+GPT-5.2_before = 9
+GPT-5.2_after  = 10
+expected_model_after = 10

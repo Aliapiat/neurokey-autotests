@@ -1,0 +1,2 @@
+total_today_before = 61
+Claude Sonnet 4.6_today_before = 8

@@ -1,0 +1,5 @@
+total_today_before = 64
+total_today_after  = 65
+DeepSeek V3.2_before = 7
+DeepSeek V3.2_after  = 8
+expected_model_after = 8

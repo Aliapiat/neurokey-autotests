@@ -1,0 +1,5 @@
+total_today_before = 60
+total_today_after  = 61
+Claude Opus 4.6_before = 6
+Claude Opus 4.6_after  = 7
+expected_model_after = 7

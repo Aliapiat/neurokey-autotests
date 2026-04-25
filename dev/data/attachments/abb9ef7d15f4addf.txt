@@ -1,0 +1,2 @@
+total_today_before = 59
+GPT-5.2_today_before = 9

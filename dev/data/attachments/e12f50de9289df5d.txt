@@ -1,0 +1,3 @@
+/home/runner/work/neurokey-autotests/neurokey-autotests/reports/model_response_times.csv
+
+{'env': 'dev', 'total_today_before': 66, 'model_today_before': 6, 'model': 'Kimi K2.5', 'prompt': 'неожиданный социалистический', 'balance_before': 7846.277599999999, 'chat_id': '4f07fca6-cd7b-4803-8751-40ebc9a53b52', 'first_completion_ms': 51296, 'total_ms': 51300, 'balance_after': 7844.2055, 'tokens_spent': 2.0721, 'total_today_after': 67, 'model_today_after': 7, 'requests_counter_delta': 1, 'timestamp_local': '2026-04-25 22:17:51', 'status': 'passed', 'error': ''}
