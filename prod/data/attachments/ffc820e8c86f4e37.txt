@@ -1,0 +1,12 @@
+ERROR    asyncio:base_events.py:1833 Task exception was never retrieved
+future: <Task finished name='Task-865' coro=<Response.finished.<locals>.on_finished() done, defined at /opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/playwright/_impl/_network.py:842> exception=Error('Target closed')>
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/playwright/_impl/_network.py", line 844, in on_finished
+    raise Error("Target closed")
+playwright._impl._errors.Error: Target closed
+ERROR    asyncio:base_events.py:1833 Task exception was never retrieved
+future: <Task finished name='Task-867' coro=<Response.finished.<locals>.on_finished() done, defined at /opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/playwright/_impl/_network.py:842> exception=Error('Target closed')>
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.12.13/x64/lib/python3.12/site-packages/playwright/_impl/_network.py", line 844, in on_finished
+    raise Error("Target closed")
+playwright._impl._errors.Error: Target closed

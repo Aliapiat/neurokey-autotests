@@ -1,0 +1,5 @@
+total_today_before = 11
+total_today_after  = 14
+GigaChat 2 Pro_before = 0
+GigaChat 2 Pro_after  = 2
+expected_model_after = 1

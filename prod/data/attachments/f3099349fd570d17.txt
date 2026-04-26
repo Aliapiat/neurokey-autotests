@@ -1,0 +1,5 @@
+total_today_before = 6
+total_today_after  = 8
+Gemini 3.1 Pro Preview_before = 0
+Gemini 3.1 Pro Preview_after  = 2
+expected_model_after = 1

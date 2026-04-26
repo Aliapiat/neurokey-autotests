@@ -1,0 +1,5 @@
+total_today_before = 16
+total_today_after  = 18
+YandexGPT 5.1 Pro_before = 0
+YandexGPT 5.1 Pro_after  = 2
+expected_model_after = 1

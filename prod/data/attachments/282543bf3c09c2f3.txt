@@ -1,0 +1,2 @@
+total_today_before = 16
+YandexGPT 5.1 Pro_today_before = 0

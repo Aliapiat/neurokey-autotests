@@ -1,0 +1,2 @@
+total_today_before = 14
+Kimi K2.5_today_before = 0

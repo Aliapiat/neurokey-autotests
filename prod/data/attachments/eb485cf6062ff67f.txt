@@ -1,0 +1,2 @@
+1) POST https://app.neiroklyuch.ru/api/chat/completions → 200  [4113 ms]
+2) POST https://app.neiroklyuch.ru/api/chat/completions → 200  [4115 ms]

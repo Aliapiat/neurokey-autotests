@@ -1,0 +1,1 @@
+total=6 Claude Sonnet 4.6=2
