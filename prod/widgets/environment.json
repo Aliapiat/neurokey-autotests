@@ -1,0 +1,1 @@
+[{"values":["prod"],"name":"Environment"},{"values":["https://app.neiroklyuch.ru/"],"name":"BaseURL"},{"values":["3.12"],"name":"Python"},{"values":["1.49.1"],"name":"Playwright"},{"values":["b5fb3f3edd951b7b993d2a099ae723a0e86e0b51"],"name":"CommitSHA"}]
